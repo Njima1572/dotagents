@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 DOTCLAUDE_HOME = Path(os.environ.get("DOTCLAUDE_HOME", Path.home() / ".orchestrator"))
-DB_DIR = DOTCLAUDE_HOME
+DB_DIR = DOTCLAUDE_HOME / "db"
 DB_PATH = DB_DIR / "orchestrator.db"
 
 STATUSES = [
