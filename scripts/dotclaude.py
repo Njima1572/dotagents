@@ -14,6 +14,7 @@ DOTCLAUDE_HOME = Path(
 )
 
 CATEGORIES = ["agents", "rules", "skills"]
+VOLUMES_DIR = DOTCLAUDE_HOME / "volumes"
 
 CLAUDE_MD_TEMPLATE = """\
 # CLAUDE.md
@@ -31,6 +32,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Git Workflow
 
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`
+"""
+
+PROFILE_TEMPLATE = r"""#!/bin/bash
+# ------------------------------------------------------------------
+#  volumes.sh  – define host:container mounts once, use everywhere
+# ------------------------------------------------------------------
+# List each mapping on its own line.
+#   * Blank lines are ignored.
+#   * Lines starting with # are comments.
+#   * Add :ro / :rw at the end per Docker syntax if you need modes.
+
+__VAR_DEFS__
+
+VOLUME_LIST="$(cat <<'EOF'
+__VOLUME_ENTRIES__
+EOF
+)"
+
+[[ -z "${VOLUME_LIST}" ]] && { echo "Volume list is empty!"; exit 1; }
+
+# Build an array of "-v" flags
+VOL_ARGS=()
+while IFS= read -r line; do
+  [[ -z $line || $line == \#* ]] && continue   # skip blanks/comments
+  # Expand variables ($PWD, $HOME) **after** we know the line is legit
+  eval line_expanded=\"${line}\"
+  VOL_ARGS+=(" -v" "${line_expanded}")
+done <<< "${VOLUME_LIST}"
+
+# Export for downstream scripts
+export DOCKER_VOLUMES="${VOL_ARGS[*]}"
 """
 
 
@@ -53,6 +85,57 @@ def item_name(path):
     if path.is_dir():
         return path.name
     return path.stem
+
+
+def home_relative(path: Path) -> str:
+    """Convert an absolute path to $HOME-relative string if possible."""
+    home = str(Path.home())
+    s = str(path)
+    if s.startswith(home):
+        return "$HOME" + s[len(home):]
+    return s
+
+
+def make_var_name(name: str) -> str:
+    """Convert a directory name to a bash variable name (e.g. my-project -> MY_PROJECT_ROOT)."""
+    return name.upper().replace("-", "_").replace(".", "_") + "_ROOT"
+
+
+def available_profiles():
+    """List available profile names in the volumes directory."""
+    if not VOLUMES_DIR.is_dir():
+        return []
+    return sorted(
+        f.name for f in VOLUMES_DIR.iterdir()
+        if f.is_file() and not f.name.startswith(".")
+    )
+
+
+def detect_profile() -> str:
+    """Detect which profile covers the current directory."""
+    if not VOLUMES_DIR.is_dir():
+        return "default"
+
+    cwd = str(Path.cwd().resolve())
+    home = str(Path.home())
+
+    for profile_path in sorted(VOLUMES_DIR.iterdir()):
+        if not profile_path.is_file() or profile_path.name == "default":
+            continue
+        content = profile_path.read_text()
+        for line in content.split("\n"):
+            if "=" not in line or line.startswith("#") or line.startswith("["):
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if key in ("DOTCLAUDE", "VOLUME_LIST") or key.startswith("VOL_") or key.startswith("export"):
+                continue
+            val = val.strip().strip('"').strip("'")
+            val = val.replace("$HOME", home)
+            if cwd == val or cwd.startswith(val + "/"):
+                return profile_path.name
+
+    return "default"
 
 
 def ensure_claude_dir(target):
@@ -288,6 +371,115 @@ def cmd_status(args):
     print(f"\nCLAUDE.md: {'exists' if claude_md.exists() else 'missing'}")
 
 
+def cmd_profile(args):
+    action = getattr(args, "action", None)
+    if action == "create":
+        cmd_profile_create(args)
+    elif action == "list":
+        cmd_profile_list()
+    else:
+        # No subcommand: show current profile
+        print(detect_profile())
+
+
+def cmd_profile_list():
+    profiles = available_profiles()
+    if not profiles:
+        print("No profiles found.")
+        return
+    current = detect_profile()
+    for name in profiles:
+        marker = " *" if name == current else ""
+        print(f"  {name}{marker}")
+
+
+def cmd_profiles(args):
+    cmd_profile_list()
+
+
+def cmd_profile_create(args):
+    name = (args.name or Path.cwd().name).lower()
+    profile_path = VOLUMES_DIR / name
+
+    if profile_path.exists() and not args.force:
+        print(f"Profile '{name}' already exists at {profile_path}")
+        print("Use -f to overwrite.")
+        sys.exit(1)
+
+    VOLUMES_DIR.mkdir(parents=True, exist_ok=True)
+
+    cwd = Path.cwd().resolve()
+    var_name = make_var_name(name)
+    dotclaude_display = home_relative(DOTCLAUDE_HOME)
+    dir_display = home_relative(cwd)
+
+    var_defs = f"DOTCLAUDE={dotclaude_display}\n{var_name}={dir_display}"
+    vol_entry = "${" + var_name + "}:${" + var_name + "}:rw"
+    volume_entries = "${DOTCLAUDE}:${DOTCLAUDE}:rw\n" + vol_entry + "\n/var/ccache:/ccache"
+
+    content = PROFILE_TEMPLATE.replace("__VAR_DEFS__", var_defs).replace(
+        "__VOLUME_ENTRIES__", volume_entries
+    )
+    profile_path.write_text(content)
+    print(f"Created profile '{name}' at {profile_path}")
+
+
+def cmd_volume(args):
+    if args.action == "add":
+        cmd_volume_add(args)
+    else:
+        print("Usage: dotclaude volume add [path] [--profile name]")
+        sys.exit(1)
+
+
+def cmd_volume_add(args):
+    profile_name = (args.profile or Path.cwd().name).lower()
+    vol_path = Path(args.path or ".").resolve()
+    profile_path = VOLUMES_DIR / profile_name
+
+    if not vol_path.is_dir():
+        print(f"Error: '{vol_path}' is not a valid directory")
+        sys.exit(1)
+
+    if not profile_path.exists():
+        print(f"Profile '{profile_name}' does not exist.")
+        print(f"Create it with: dotclaude profile create {profile_name}")
+        sys.exit(1)
+
+    content = profile_path.read_text()
+    dir_display = home_relative(vol_path)
+
+    # Check if path is already mounted (exact variable assignment match)
+    if f"={dir_display}\n" in content or f"={str(vol_path)}\n" in content:
+        print(f"'{dir_display}' is already mounted in profile '{profile_name}'")
+        return
+
+    var_name = make_var_name(vol_path.name)
+
+    # Handle variable name collision
+    if f"\n{var_name}=" in content or content.startswith(f"{var_name}="):
+        i = 2
+        while f"{var_name}_{i}=" in content:
+            i += 1
+        var_name = f"{var_name}_{i}"
+
+    vol_entry = "${" + var_name + "}:${" + var_name + "}:rw"
+
+    # Insert variable definition before VOLUME_LIST and volume entry before EOF
+    lines = content.split("\n")
+    result = []
+    for line in lines:
+        if line.startswith("VOLUME_LIST="):
+            result.append(f"{var_name}={dir_display}")
+            result.append("")
+        if line == "EOF":
+            result.append(vol_entry)
+        result.append(line)
+
+    profile_path.write_text("\n".join(result))
+    print(f"Added '{dir_display}' to profile '{profile_name}'")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="dotclaude",
@@ -322,6 +514,24 @@ def main():
     p_status = sub.add_parser("status", help="Show what's installed in current project")
     p_status.add_argument("directory", nargs="?", default=".", help="Project directory (default: .)")
 
+    # profile
+    p_profile = sub.add_parser("profile", help="Manage volume profiles")
+    p_profile_sub = p_profile.add_subparsers(dest="action")
+    p_profile_create = p_profile_sub.add_parser("create", help="Create a new volume profile")
+    p_profile_create.add_argument("name", nargs="?", help="Profile name (default: current dir name)")
+    p_profile_create.add_argument("-f", "--force", action="store_true", help="Overwrite existing profile")
+    p_profile_sub.add_parser("list", help="List available profiles")
+
+    # profiles (alias for profile list)
+    sub.add_parser("profiles", help="List available volume profiles")
+
+    # volume
+    p_volume = sub.add_parser("volume", help="Manage volume mappings")
+    p_volume_sub = p_volume.add_subparsers(dest="action")
+    p_volume_add = p_volume_sub.add_parser("add", help="Add a volume mapping to a profile")
+    p_volume_add.add_argument("path", nargs="?", help="Path to mount (default: current dir)")
+    p_volume_add.add_argument("-p", "--profile", help="Profile name (default: current dir name)")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -334,6 +544,9 @@ def main():
         "remove": cmd_remove,
         "list": cmd_list,
         "status": cmd_status,
+        "profile": cmd_profile,
+        "profiles": cmd_profiles,
+        "volume": cmd_volume,
     }[args.command](args)
 
 

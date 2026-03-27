@@ -7,9 +7,34 @@ current_dir=$PWD
 GIT_REPO_ROOT=/Users/kochi/Development/dotclaude
 cd $GIT_REPO_ROOT
 script_dir=$(dirname "$(readlink -f "$0")")
-source "$GIT_REPO_ROOT/volumes.sh"
+source "$GIT_REPO_ROOT/volumes/default"
 
-echo $DOCKER_VOLUMES
+# Warn if current directory is not covered by any mounted volume
+path_mounted=false
+while IFS= read -r line; do
+  [[ -z $line || $line == \#* ]] && continue
+  eval line_expanded=\"${line}\"
+  host_path="${line_expanded%%:*}"
+  case "$current_dir" in
+    "${host_path}"|"${host_path}"/*) path_mounted=true; break ;;
+  esac
+done <<< "${VOLUME_LIST}"
+
+if [[ "$path_mounted" == "false" ]]; then
+  echo "WARNING: $current_dir is not mounted in the container."
+  echo "Claude Code will not be able to access files in this directory."
+  echo ""
+  echo "To fix this, run:"
+  echo "  dotclaude volume add $current_dir"
+  echo ""
+  echo "Or manually edit: $GIT_REPO_ROOT/volumes/common"
+  echo ""
+  read -rp "Continue anyway? [y/N] " answer
+  if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
+fi
 
 docker compose run -it $DOCKER_VOLUMES -w $current_dir --rm claude-code claude $@
 
