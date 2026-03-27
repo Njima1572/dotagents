@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# ///
 """Orchestrator - Task and idea manager backed by SQLite, with claude-code integration."""
 
 import argparse

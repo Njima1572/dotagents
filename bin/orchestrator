@@ -1,2 +1,2 @@
 #!/bin/sh
-exec uv run "$(dirname "$0")/../scripts/orchestrator.py" "$@"
+exec uv run --script "$(dirname "$0")/../scripts/orchestrator.py" "$@"
