@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # ------------------------------------------------------------------
 #  volumes.sh  – define host:container mounts once, use everywhere
@@ -9,11 +8,10 @@
 #   * Add :ro / :rw at the end per Docker syntax if you need modes.
 
 DOTCLAUDE=$HOME/Development/dotclaude
-WADALAB_ROOT=$HOME/Development/WadaLab
 
+# Add your volume mappings here, one per line. Use absolute paths on the left (host).
 VOLUME_LIST="$(cat <<'EOF'
 ${DOTCLAUDE}:${DOTCLAUDE}:rw
-${WADALAB_ROOT}:${WADALAB_ROOT}:rw
 /var/ccache:/ccache
 EOF
 )"
