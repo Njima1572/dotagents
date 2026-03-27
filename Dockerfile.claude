@@ -1,5 +1,6 @@
 FROM node:22
 
+# ── Configuration ────────────────────────────────────────────────
 ARG TZ
 ENV TZ="$TZ"
 ARG CLAUDE_CODE_VERSION="latest"
@@ -8,56 +9,57 @@ ARG GITLAB_CLI_VERSION="1.82.0"
 ARG GO_VERSION="1.26.0"
 ENV USER_HOME=/home/${USERNAME}
 
+# ── Feature flags (all enabled by default) ───────────────────────
+ARG ENABLE_CHROME=true
+ARG ENABLE_GO=true
+ARG ENABLE_ENTIRE=true
+ARG ENABLE_AWS=true
+ARG ENABLE_BUN=true
+ARG ENABLE_PYTHON=true
+ARG ENABLE_UV=true
+ARG ENABLE_PYRIGHT=true
+ARG ENABLE_AGENT_BROWSER=true
+
+
 # Create user if it doesn't already exist (e.g. USERNAME != node)
 RUN if ! id -u ${USERNAME} > /dev/null 2>&1; then \
   groupadd -r ${USERNAME} && \
   useradd -m -g ${USERNAME} -d ${USER_HOME} -s /bin/zsh ${USERNAME}; \
   fi
 
-# Install basic development tools and iptables/ipset
-RUN apt update && apt install -y  \
-  # Start - Chorme dependencies 
-  libatk1.0-0 \
-  libatk-bridge2.0-0 \
-  libdbus-1-3 \
-  libcups2 \
-  libxkbcommon0 \
-  libatspi2.0-0 \
-  libxcomposite1 \
-  libxdamage1 \
-  libxfixes3 \
-  libxrandr2 \
-  libgbm1 \
-  libasound2 \
-  libnss3 \
-  fonts-noto-core \
-  # End - Chrome dependencies
-  less \
-  git \
-  git-lfs \
-  procps \
-  sudo \
-  fzf \
-  zsh \
-  man-db \
-  unzip \
-  gnupg \
-  gh \
-  iptables \
-  ipset \
-  iproute2 \
-  dnsutils \
-  aggregate \
-  jq \
-  ripgrep \
-  openssh-client \
-  ca-certificates \
-  build-essential \
-  poppler-utils \
-  python3 \
-  python3-pip && \
-
-  # ---- cleanup -------------------------------------------------
+# Install base dev tools + conditionally add Chrome/Python apt packages
+RUN CHROME_PKGS="" && \
+  PYTHON_PKGS="" && \
+  if [ "$ENABLE_CHROME" = "true" ]; then \
+    CHROME_PKGS="libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3 libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libnss3 fonts-noto-core"; \
+  fi && \
+  if [ "$ENABLE_PYTHON" = "true" ]; then \
+    PYTHON_PKGS="python3 python3-pip poppler-utils"; \
+  fi && \
+  apt update && apt install -y \
+    $CHROME_PKGS \
+    $PYTHON_PKGS \
+    less \
+    git \
+    git-lfs \
+    procps \
+    sudo \
+    fzf \
+    zsh \
+    man-db \
+    unzip \
+    gnupg \
+    gh \
+    iptables \
+    ipset \
+    iproute2 \
+    dnsutils \
+    aggregate \
+    jq \
+    ripgrep \
+    openssh-client \
+    ca-certificates \
+    build-essential && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/* && \
   echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -66,7 +68,7 @@ RUN apt update && apt install -y  \
 RUN mkdir -p /usr/local/share/npm-global && \
   chown -R ${USERNAME}:${USERNAME} /usr/local/share
 
-# Persist bash history.
+# Persist bash history
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   && mkdir /commandhistory \
   && touch /commandhistory/.bash_history \
@@ -79,6 +81,7 @@ ENV DEVCONTAINER=true
 RUN mkdir -p ${USER_HOME}/.claude ${USER_HOME}/.pip-packages && \
   chown -R ${USERNAME}:${USERNAME} ${USER_HOME}/.claude ${USER_HOME}/.pip-packages
 
+# Install git-delta
 RUN ARCH=$(dpkg --print-architecture) && \
   wget "https://github.com/dandavison/delta/releases/download/0.18.2/git-delta_0.18.2_${ARCH}.deb" && \
   sudo dpkg -i "git-delta_0.18.2_${ARCH}.deb" && \
@@ -87,20 +90,30 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # Install Go
-RUN wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz && tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz && rm go${GO_VERSION}.linux-amd64.tar.gz
+RUN if [ "$ENABLE_GO" = "true" ]; then \
+  ARCH=$(dpkg --print-architecture) && \
+  wget https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz && \
+  tar -C /usr/local -xzf go${GO_VERSION}.linux-${ARCH}.tar.gz && \
+  rm go${GO_VERSION}.linux-${ARCH}.tar.gz; \
+  fi
 ENV PATH=$PATH:/usr/local/go/bin
 
 # Install AWS CLI v2
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
-
+RUN if [ "$ENABLE_AWS" = "true" ]; then \
+  ARCH=$(uname -m) && \
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-${ARCH}.zip" -o "awscliv2.zip" && \
+  unzip awscliv2.zip && \
+  ./aws/install && \
+  rm -rf awscliv2.zip aws; \
+  fi
 
 # Set up non-root user
 USER ${USERNAME}
 
-# Install uvx for serena-mcp
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+# Install uv/uvx
+RUN if [ "$ENABLE_UV" = "true" ]; then \
+  curl -LsSf https://astral.sh/uv/install.sh | sh; \
+  fi
 
 # Install Claude CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -109,7 +122,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH=${USER_HOME}/.local/bin:$PATH
 
 # Install bun
-RUN curl -fsSL https://bun.com/install | bash
+RUN if [ "$ENABLE_BUN" = "true" ]; then \
+  curl -fsSL https://bun.com/install | bash; \
+  fi
 ENV PATH=${USER_HOME}/.bun/bin:${USER_HOME}/go/bin:$PATH
 
 # Install global packages
@@ -133,20 +148,27 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   -x
 
-# Install Claude and pyright LSP
-RUN npm install -g pyright
-RUN go install github.com/entireio/cli/cmd/entire@latest
+# Install pyright LSP
+RUN if [ "$ENABLE_PYRIGHT" = "true" ]; then \
+  npm install -g pyright; \
+  fi
+
+# Install entire CLI (requires Go)
+RUN if [ "$ENABLE_ENTIRE" = "true" ] && [ "$ENABLE_GO" = "true" ]; then \
+  go install github.com/entireio/cli/cmd/entire@latest; \
+  fi
+
+# Install agent-browser (requires Chrome dependencies)
+RUN if [ "$ENABLE_AGENT_BROWSER" = "true" ] && [ "$ENABLE_CHROME" = "true" ]; then \
+  npm install -g agent-browser && agent-browser install; \
+  fi
 
 
-# agent-browser installation
-RUN npm install -g agent-browser && agent-browser install
-
-# Install Lightpanda browser
-RUN curl -L -o ${USER_HOME}/.local/bin/lightpanda https://github.com/lightpanda-io/browser/releases/download/nightly/lightpanda-x86_64-linux && chmod a+x ${USER_HOME}/.local/bin/lightpanda
-
+# Install Python requirements
 COPY ./requirements.txt /tmp/requirements.txt
-RUN --mount=type=cache,target=/home/${USERNAME}/.cache/pip,uid=1000 \
-  pip3 install --break-system-packages -r /tmp/requirements.txt
+RUN if [ "$ENABLE_PYTHON" = "true" ]; then \
+  pip3 install --break-system-packages -r /tmp/requirements.txt; \
+  fi
 
 COPY ./.gitconfig ${USER_HOME}/.gitconfig
 

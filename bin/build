@@ -9,7 +9,37 @@ cd $GIT_REPO_ROOT
 CLAUDE_CODE_VERSION=latest
 USERNAME=node
 
-docker compose --progress=plain build --build-arg USERNAME=$USERNAME --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION claude-code
+# Load feature flags from .env.build (env vars still override)
+if [ -f "$GIT_REPO_ROOT/.env.build" ]; then
+  set -a
+  source "$GIT_REPO_ROOT/.env.build"
+  set +a
+fi
+
+# Defaults if not set via .env.build or environment
+ENABLE_CHROME=${ENABLE_CHROME:-true}
+ENABLE_GO=${ENABLE_GO:-true}
+ENABLE_ENTIRE=${ENABLE_ENTIRE:-true}
+ENABLE_AWS=${ENABLE_AWS:-true}
+ENABLE_BUN=${ENABLE_BUN:-true}
+ENABLE_PYTHON=${ENABLE_PYTHON:-true}
+ENABLE_UV=${ENABLE_UV:-true}
+ENABLE_PYRIGHT=${ENABLE_PYRIGHT:-true}
+ENABLE_AGENT_BROWSER=${ENABLE_AGENT_BROWSER:-true}
+
+docker compose --progress=plain build \
+  --build-arg USERNAME=$USERNAME \
+  --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION \
+  --build-arg ENABLE_CHROME=$ENABLE_CHROME \
+  --build-arg ENABLE_GO=$ENABLE_GO \
+  --build-arg ENABLE_ENTIRE=$ENABLE_ENTIRE \
+  --build-arg ENABLE_AWS=$ENABLE_AWS \
+  --build-arg ENABLE_BUN=$ENABLE_BUN \
+  --build-arg ENABLE_PYTHON=$ENABLE_PYTHON \
+  --build-arg ENABLE_UV=$ENABLE_UV \
+  --build-arg ENABLE_PYRIGHT=$ENABLE_PYRIGHT \
+  --build-arg ENABLE_AGENT_BROWSER=$ENABLE_AGENT_BROWSER \
+  claude-code
 # docker build --network=host -t claude-code:$CLAUDE_CODE_VERSION --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION -f Dockerfile.claude .
 
 cleanup() {
