@@ -24,6 +24,9 @@ Skills are slash commands available in Claude Code (e.g., `/plan`, `/tdd`).
 | `code-review` | Review code changes for quality, standards compliance, and potential issues |
 | `plan` | Create implementation plan before coding |
 | `tdd` | Test-driven development workflow |
+| `worktree-create` | Create a git worktree for parallel development |
+| `worktree-merge` | Merge a worktree's feature branch into the base branch |
+| `worktree-remove` | Clean up a git worktree after a feature is complete |
 
 ### Agents
 
@@ -38,7 +41,8 @@ Agents are specialized subagents that Claude can spawn for specific tasks.
 
 | Tool | Description |
 |---|---|
-| `dotclaude` | Bootstrap `.claude/` in any project |
+| `dotclaude` | Bootstrap `.claude/` in any project, manage volume profiles |
+| `claude-code` | Run Claude Code in a Docker container with the correct volume profile |
 | `orchestrator` | Task and idea manager backed by SQLite |
 
 ## dotclaude CLI
@@ -72,12 +76,67 @@ dotclaude status
 
 Symlinked items are automatically added to the project's `.gitignore`.
 
+### Volume Profiles
+
+Volume profiles define which host directories are mounted into the Docker container. Each profile is a file in `volumes/` (e.g., `volumes/proect1`, `volumes/project2`). The `default` profile is used as a fallback.
+
+```bash
+# Show the current profile (detected automatically)
+dotclaude profile
+
+# List all available profiles (* marks active)
+dotclaude profiles
+dotclaude profile list
+
+# Create a new profile for the current directory
+dotclaude profile create
+dotclaude profile create myproject
+
+# Add a volume to an existing profile
+dotclaude volume add                          # current dir -> current profile
+dotclaude volume add /path/to/dir             # specific dir -> current profile
+dotclaude volume add --profile myproject      # current dir -> specific profile
+```
+
+#### Profile Detection
+
+The active profile is resolved via a 3-step fallback:
+
+1. **`$DOTCLAUDE_PROFILE`** env var — set via `.envrc` / [direnv](https://direnv.net/) / manual export
+2. **Directory basename** — `lowercase(basename(cwd))` matched against profile files
+3. **`default`** — the fallback profile
+
+Using [direnv](https://direnv.net/) is recommended. `dotclaude init` automatically writes a `.envrc` when a matching profile exists:
+
+```bash
+# .envrc (auto-created by dotclaude init)
+export DOTCLAUDE_PROFILE=myproject
+```
+
 ### Configuration
 
 By default, `dotclaude` looks for the repo at `~/Development/dotclaude`. Override with:
 
 ```bash
 export DOTCLAUDE_HOME=/path/to/your/dotclaude
+```
+
+## claude-code (Docker)
+
+The `claude-code` wrapper runs Claude Code inside a Docker container, automatically selecting the right volume profile for the current directory.
+
+```bash
+# From any project directory
+claude-code
+```
+
+If the current directory is not mounted in the selected profile, it warns and prompts before proceeding:
+
+```
+WARNING: /path/to/dir is not mounted in the container.
+To fix this, run:
+  dotclaude volume add /path/to/dir
+Continue anyway? [y/N]
 ```
 
 ## orchestrator CLI
@@ -141,8 +200,16 @@ dotclaude/
     code-review/
     plan/
     tdd/
+    worktree-create/
+    worktree-merge/
+    worktree-remove/
   rules/                # Rules (.md)
+  volumes/              # Docker volume profiles (bash scripts)
+    default             # Fallback profile
+    project1            # Project-specific profiles
+    ...
   bin/                  # CLI entrypoints (shell wrappers)
+    claude-code
     dotclaude
     orchestrator
   scripts/              # Python scripts and shell utilities
@@ -150,6 +217,8 @@ dotclaude/
     orchestrator.py
     setup.sh
     notify-discord.sh
+  Dockerfile.claude     # Docker image for containerized Claude Code
+  docker-compose.yml
 ```
 
 ## Discord Notifications
