@@ -27,7 +27,7 @@ ENABLE_UV=${ENABLE_UV:-true}
 ENABLE_PYRIGHT=${ENABLE_PYRIGHT:-true}
 ENABLE_AGENT_BROWSER=${ENABLE_AGENT_BROWSER:-true}
 
-docker compose --progress=plain build \
+docker compose build \
   --build-arg USERNAME=$USERNAME \
   --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION \
   --build-arg ENABLE_CHROME=$ENABLE_CHROME \

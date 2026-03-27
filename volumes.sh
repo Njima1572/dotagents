@@ -1,0 +1,34 @@
+
+#!/bin/bash
+# ------------------------------------------------------------------
+#  volumes.sh  – define host:container mounts once, use everywhere
+# ------------------------------------------------------------------
+# List each mapping on its own line.
+#   * Blank lines are ignored.
+#   * Lines starting with # are comments.
+#   * Add :ro / :rw at the end per Docker syntax if you need modes.
+
+DOTCLAUDE=$HOME/Development/dotclaude
+WADALAB_ROOT=$HOME/Development/WadaLab
+
+VOLUME_LIST="$(cat <<'EOF'
+${DOTCLAUDE}:${DOTCLAUDE}:rw
+${WADALAB_ROOT}:${WADALAB_ROOT}:rw
+/var/ccache:/ccache
+EOF
+)"
+
+[[ -z "${VOLUME_LIST}" ]] && { echo "Volume list is empty!"; exit 1; }
+
+# Build an array of "-v" flags
+VOL_ARGS=()
+while IFS= read -r line; do
+  [[ -z $line || $line == \#* ]] && continue   # skip blanks/comments
+  # Expand variables ($PWD, $HOME) **after** we know the line is legit
+  eval line_expanded=\"${line}\"
+  VOL_ARGS+=(" -v" "${line_expanded}")
+done <<< "${VOLUME_LIST}"
+
+# Export for downstream scripts
+export DOCKER_VOLUMES="${VOL_ARGS[*]}"
+
