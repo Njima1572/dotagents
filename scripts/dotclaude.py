@@ -112,28 +112,20 @@ def available_profiles():
 
 
 def detect_profile() -> str:
-    """Detect which profile covers the current directory."""
-    if not VOLUMES_DIR.is_dir():
-        return "default"
+    """Detect the current profile via env var, directory basename, or default.
 
-    cwd = str(Path.cwd().resolve())
-    home = str(Path.home())
+    Fallback chain:
+      1. $DOTCLAUDE_PROFILE env var (set via .envrc / direnv / manual export)
+      2. lowercase(basename(cwd)) if a matching profile file exists
+      3. "default"
+    """
+    env_profile = os.environ.get("DOTCLAUDE_PROFILE")
+    if env_profile and (VOLUMES_DIR / env_profile).is_file():
+        return env_profile
 
-    for profile_path in sorted(VOLUMES_DIR.iterdir()):
-        if not profile_path.is_file() or profile_path.name == "default":
-            continue
-        content = profile_path.read_text()
-        for line in content.split("\n"):
-            if "=" not in line or line.startswith("#") or line.startswith("["):
-                continue
-            key, _, val = line.partition("=")
-            key = key.strip()
-            if key in ("DOTCLAUDE", "VOLUME_LIST") or key.startswith("VOL_") or key.startswith("export"):
-                continue
-            val = val.strip().strip('"').strip("'")
-            val = val.replace("$HOME", home)
-            if cwd == val or cwd.startswith(val + "/"):
-                return profile_path.name
+    basename_profile = Path.cwd().name.lower()
+    if (VOLUMES_DIR / basename_profile).is_file():
+        return basename_profile
 
     return "default"
 
@@ -206,6 +198,24 @@ def cmd_init(args):
     else:
         claude_md.write_text(CLAUDE_MD_TEMPLATE)
         print("  created CLAUDE.md")
+
+    # Write .envrc if a matching profile exists
+    profile_name = target.name.lower()
+    if (VOLUMES_DIR / profile_name).is_file():
+        envrc = target / ".envrc"
+        envrc_line = f"export DOTCLAUDE_PROFILE={profile_name}"
+        if envrc.exists():
+            existing = envrc.read_text()
+            if "DOTCLAUDE_PROFILE" not in existing:
+                if not existing.endswith("\n"):
+                    existing += "\n"
+                envrc.write_text(existing + envrc_line + "\n")
+                print(f"  appended DOTCLAUDE_PROFILE to .envrc")
+            else:
+                print(f"  skip .envrc (DOTCLAUDE_PROFILE already set)")
+        else:
+            envrc.write_text(envrc_line + "\n")
+            print(f"  created .envrc (DOTCLAUDE_PROFILE={profile_name})")
 
     if args.what == "all":
         print()

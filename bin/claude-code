@@ -7,7 +7,15 @@ current_dir=$PWD
 GIT_REPO_ROOT=/Users/kochi/Development/dotclaude
 cd $GIT_REPO_ROOT
 script_dir=$(dirname "$(readlink -f "$0")")
-source "$GIT_REPO_ROOT/volumes/default"
+# Resolve profile: $DOTCLAUDE_PROFILE > basename of cwd > default
+PROFILE="${DOTCLAUDE_PROFILE:-}"
+if [[ -z "$PROFILE" || ! -f "$GIT_REPO_ROOT/volumes/$PROFILE" ]]; then
+  PROFILE="$(basename "$current_dir" | tr '[:upper:]' '[:lower:]')"
+fi
+if [[ ! -f "$GIT_REPO_ROOT/volumes/$PROFILE" ]]; then
+  PROFILE="default"
+fi
+source "$GIT_REPO_ROOT/volumes/$PROFILE"
 
 # Warn if current directory is not covered by any mounted volume
 path_mounted=false
@@ -27,7 +35,7 @@ if [[ "$path_mounted" == "false" ]]; then
   echo "To fix this, run:"
   echo "  dotclaude volume add $current_dir"
   echo ""
-  echo "Or manually edit: $GIT_REPO_ROOT/volumes/common"
+  echo "Or manually edit: $GIT_REPO_ROOT/volumes/$PROFILE"
   echo ""
   read -rp "Continue anyway? [y/N] " answer
   if [[ ! "$answer" =~ ^[Yy]$ ]]; then
