@@ -1,0 +1,61 @@
+
+services:
+  claude-code:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude
+      network: host
+    container_name: claude-code-sandbox
+    hostname: claude-code-sandbox
+    # extra_hosts:
+    #   - "hostmachine:10.0.64.1"
+    # network_mode: host
+    networks:
+      claude-net:
+        aliases:
+          - claude-code
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=4096"
+      CLAUDE_CONFIG_DIR: "/home/kn/.claude"
+      POWERLEVEL9K_DISABLE_GITSTATUS: "true"
+    volumes:
+      - ${HOME}/.nuget:/home/kn/.nuget:ro
+      - ${HOME}/.dotnet:/home/kn/.dotnet
+      - .config:/home/kn/.config
+      - claude-code-bashhistory:/commandhistory
+      - ./.pip-packages:/home/kn/.pip-packages
+      - ./claude:/home/kn/.claude
+    working_dir: /home/kn/Development
+    command: claude
+    stdin_open: true
+    tty: true
+
+  playwright:
+    build:
+      context: ./services/playwright-mcp
+      network: host
+    networks:
+      claude-net:
+        aliases:
+          - playwright
+    environment:
+      HEADLESS: "true"
+      MCP_PORT: "8931"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    shm_size: "256m"
+    ports:
+      - "8931:8931"
+
+volumes:
+  claude-code-bashhistory:
+
+networks:
+  claude-net:
+    driver: bridge

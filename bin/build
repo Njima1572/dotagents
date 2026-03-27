@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+current_dir=$PWD
+
+GIT_REPO_ROOT=$(git rev-parse --show-toplevel)
+cd $GIT_REPO_ROOT
+
+CLAUDE_CODE_VERSION=latest
+USERNAME=node
+
+docker compose --progress=plain build --build-arg USERNAME=$USERNAME --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION claude-code
+# docker build --network=host -t claude-code:$CLAUDE_CODE_VERSION --build-arg CLAUDE_CODE_VERSION=$CLAUDE_CODE_VERSION -f Dockerfile.claude .
+
+cleanup() {
+  cd $current_dir
+}
+trap cleanup EXIT SIGINT SIGTERM SIGKILL
